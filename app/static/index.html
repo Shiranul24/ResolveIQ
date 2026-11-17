@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ResolveIQ · Service Desk</title>
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --ink:#1c2333; --muted:#667085; --line:#e4e7ec; --brand:#6d28d9; --brand-ink:#fff;
+          --low:#0e7490; --medium:#a16207; --high:#c2410c; --critical:#b91c1c; --ok:#15803d; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#181c25; --ink:#e6e9ef; --muted:#98a2b3; --line:#2a303c; --brand:#a78bfa; --brand-ink:#16121f;
+            --low:#67e8f9; --medium:#facc15; --high:#fb923c; --critical:#f87171; --ok:#4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:12px; padding:14px 20px; background:var(--card); border-bottom:1px solid var(--line); }
+  header h1 { font-size:18px; margin:0; flex:1; } header h1 span { color:var(--brand); }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; display:grid; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px; }
+  input, select, textarea { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+  textarea { min-height:80px; resize:vertical; }
+  button { padding:8px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); font:inherit; cursor:pointer; }
+  button.primary { background:var(--brand); color:var(--brand-ink); border-color:var(--brand); font-weight:600; }
+  button.small { padding:4px 9px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); }
+  .stats { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
+  .stat b { display:block; font-size:24px; } .stat span { font-size:13px; color:var(--muted); }
+  .scroll { overflow-x:auto; } table { width:100%; border-collapse:collapse; min-width:720px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  tbody tr { cursor:pointer; } tbody tr:hover { background:var(--bg); }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; font-size:12px; font-weight:600; border:1px solid currentColor; white-space:nowrap; }
+  .low{color:var(--low)} .medium{color:var(--medium)} .high{color:var(--high)} .critical{color:var(--critical)} .ok{color:var(--ok)}
+  .muted { color:var(--muted); font-size:13px; } .error { color:var(--critical); font-size:13px; min-height:18px; }
+  .hidden { display:none !important; }
+  .preview { margin-top:10px; padding:10px; border:1px dashed var(--line); border-radius:8px; font-size:14px; }
+  .timeline { list-style:none; padding:0; margin:0; display:grid; gap:8px; }
+  .timeline li { padding:8px 10px; background:var(--bg); border-radius:8px; font-size:14px; overflow-wrap:anywhere; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; }
+  #auth { max-width:420px; margin:40px auto; display:grid; gap:12px; }
+  .tabs { display:flex; gap:8px; } .tabs button.active { border-color:var(--brand); color:var(--brand); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Resolve<span>IQ</span> <small class="muted">service desk</small></h1>
+  <span id="whoami" class="muted"></span>
+  <button id="logout" class="small hidden">Log out</button>
+</header>
+
+<main>
+  <!-- Sign in / register -->
+  <section id="auth" class="card hidden">
+    <div class="tabs">
+      <button id="tab-login" class="active" type="button">Log in</button>
+      <button id="tab-register" type="button">Register</button>
+    </div>
+    <form id="auth-form">
+      <div id="name-field" class="hidden"><label for="name">Full name</label><input id="name" autocomplete="name"></div>
+      <label for="email" style="margin-top:8px">Email</label><input id="email" type="email" autocomplete="username" required>
+      <label for="password" style="margin-top:8px">Password (min. 8 characters)</label>
+      <input id="password" type="password" autocomplete="current-password" required minlength="8">
+      <p id="auth-error" class="error" role="alert"></p>
+      <button class="primary" type="submit" id="auth-submit">Log in</button>
+    </form>
+    <p class="muted">Tip: run <code>python -m app.seed</code> for demo accounts. The first account registered becomes the admin.</p>
+  </section>
+
+  <div id="app" class="hidden" style="display:grid; gap:16px;">
+    <section id="stats" class="stats hidden" aria-label="Desk summary"></section>
+
+    <section class="card">
+      <h2>Raise a ticket</h2>
+      <form id="ticket-form">
+        <label for="title">Title</label><input id="title" required minlength="3" maxlength="200" placeholder="e.g. VPN keeps disconnecting">
+        <label for="description" style="margin-top:8px">What is happening?</label>
+        <textarea id="description" required minlength="5" maxlength="5000"></textarea>
+        <div id="preview" class="preview muted">Start typing to see how this ticket will be routed.</div>
+        <p id="ticket-error" class="error" role="alert"></p>
+        <button class="primary" type="submit">Submit ticket</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Tickets <span id="total" class="muted"></span></h2>
+      <div class="row" style="margin-bottom:12px">
+        <div><label for="f-q">Search</label><input id="f-q" placeholder="title or description"></div>
+        <div><label for="f-status">Status</label><select id="f-status"><option value="">Any</option><option>open</option><option>in_progress</option><option>resolved</option><option>closed</option></select></div>
+        <div><label for="f-priority">Priority</label><select id="f-priority"><option value="">Any</option><option>critical</option><option>high</option><option>medium</option><option>low</option></select></div>
+        <div><label for="f-breached">SLA</label><select id="f-breached"><option value="">Any</option><option value="true">Breached</option><option value="false">On track</option></select></div>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>#</th><th>Title</th><th>Category</th><th>Priority</th><th>Status</th><th>SLA due</th><th>Assignee</th><th>Actions</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="muted hidden">No tickets match these filters.</p>
+      <div class="actions" style="margin-top:12px; align-items:center">
+        <button id="prev" class="small" type="button">← Newer</button>
+        <button id="next" class="small" type="button">Older →</button>
+        <span id="page" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="detail" class="card hidden" aria-live="polite"></section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const LIMIT = 10;
+const state = { token: localStorage.getItem("riq_token"), user: null, offset: 0, total: 0, mode: "login", openId: null };
+
+// Everything from the server is escaped before it is put into HTML.
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const when = (iso) => new Date(iso + "Z").toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+const isStaff = () => state.user && state.user.role !== "employee";
+
+async function api(path, { method = "GET", body } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 401 && state.token) { logout(); throw new Error("Session expired - please log in again"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join("; ") : data.detail;
+    throw new Error(detail || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+// ---------- auth ----------
+function setMode(mode) {
+  state.mode = mode;
+  $("tab-login").classList.toggle("active", mode === "login");
+  $("tab-register").classList.toggle("active", mode === "register");
+  $("name-field").classList.toggle("hidden", mode === "login");
+  $("auth-submit").textContent = mode === "login" ? "Log in" : "Create account";
+  $("auth-error").textContent = "";
+}
+$("tab-login").onclick = () => setMode("login");
+$("tab-register").onclick = () => setMode("register");
+
+$("auth-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const creds = { email: $("email").value.trim(), password: $("password").value };
+  try {
+    if (state.mode === "register") await api("/api/auth/register", { method: "POST", body: { name: $("name").value.trim(), ...creds } });
+    const { access_token, user } = await api("/api/auth/login", { method: "POST", body: creds });
+    state.token = access_token; state.user = user;
+    localStorage.setItem("riq_token", access_token);
+    $("password").value = "";
+    showApp();
+  } catch (err) { $("auth-error").textContent = err.message; }
+};
+
+function logout() {
+  state.token = null; state.user = null; state.openId = null;
+  localStorage.removeItem("riq_token");
+  $("app").classList.add("hidden"); $("logout").classList.add("hidden"); $("whoami").textContent = "";
+  $("auth").classList.remove("hidden");
+}
+$("logout").onclick = logout;
+
+function showApp() {
+  $("auth").classList.add("hidden"); $("app").classList.remove("hidden"); $("logout").classList.remove("hidden");
+  $("whoami").textContent = `${state.user.name} · ${state.user.role}`;
+  refresh();
+}
+
+// ---------- summary cards (staff only) ----------
+async function loadStats() {
+  $("stats").classList.toggle("hidden", !isStaff());
+  if (!isStaff()) return;
+  const s = await api("/api/analytics/summary");
+  const active = (s.by_status.open || 0) + (s.by_status.in_progress || 0);
+  const cards = [
+    [active, "Active tickets"], [s.unassigned_open, "Unassigned"], [s.open_breaches, "SLA breaches (active)"],
+    [s.needs_review, "Need category review"],
+    [s.sla_compliance_pct === null ? "–" : s.sla_compliance_pct + "%", "Resolved within SLA"],
+    [s.avg_resolution_hours === null ? "–" : s.avg_resolution_hours + " h", "Avg. resolution time"],
+  ];
+  $("stats").innerHTML = cards.map(([value, label]) => `<div class="card stat"><b>${esc(value)}</b><span>${esc(label)}</span></div>`).join("");
+}
+
+// ---------- ticket list ----------
+function actionsFor(t) {
+  const mine = t.requester.id === state.user.id, staff = isStaff(), out = [];
+  if (t.status === "open" && staff) out.push(["in_progress", "Start"]);
+  if (t.status === "open" && (staff || mine)) out.push(["closed", staff ? "Close" : "Withdraw"]);
+  if (t.status === "in_progress" && staff) out.push(["resolved", "Resolve"]);
+  if (t.status === "resolved" && (staff || mine)) out.push(["closed", staff ? "Close" : "Accept fix"], ["in_progress", "Reopen"]);
+  return out.map(([to, label]) => `<button class="small" data-id="${t.id}" data-to="${to}">${label}</button>`).join("");
+}
+
+async function loadTickets() {
+  const params = new URLSearchParams({ limit: LIMIT, offset: state.offset });
+  for (const [key, id] of [["q", "f-q"], ["status", "f-status"], ["priority", "f-priority"], ["breached", "f-breached"]]) {
+    const value = $(id).value.trim();
+    if (value && !(key === "q" && value.length < 2)) params.set(key, value);
+  }
+  const page = await api(`/api/tickets?${params}`);
+  state.total = page.total;
+  $("rows").innerHTML = page.items.map((t) => `
+    <tr data-open="${t.id}">
+      <td>${t.id}</td>
+      <td>${esc(t.title)}<div class="muted">by ${esc(t.requester.name)}</div></td>
+      <td>${esc(t.category)}${t.needs_review ? ' <span class="pill high">review</span>' : ""}<div class="muted">${Math.round(t.category_confidence * 100)}% confident</div></td>
+      <td><span class="pill ${esc(t.priority)}">${esc(t.priority)}</span></td>
+      <td>${esc(t.status.replace("_", " "))}</td>
+      <td>${esc(when(t.sla_due_at))}<div><span class="pill ${t.sla_breached ? "critical" : "ok"}">${t.sla_breached ? "breached" : "on track"}</span></div></td>
+      <td>${t.assignee ? esc(t.assignee.name) : '<span class="muted">unassigned</span>'}</td>
+      <td><div class="actions">${actionsFor(t)}</div></td>
+    </tr>`).join("");
+  $("empty").classList.toggle("hidden", page.items.length > 0);
+  $("total").textContent = `(${page.total})`;
+  $("page").textContent = page.total ? `${state.offset + 1}–${state.offset + page.items.length} of ${page.total}` : "";
+  $("prev").disabled = state.offset === 0;
+  $("next").disabled = state.offset + LIMIT >= page.total;
+}
+
+$("rows").onclick = async (e) => {
+  const button = e.target.closest("button[data-to]");
+  if (button) {
+    e.stopPropagation();
+    try { await api(`/api/tickets/${button.dataset.id}`, { method: "PATCH", body: { status: button.dataset.to } }); }
+    catch (err) { alert(err.message); }
+    return refresh();
+  }
+  const row = e.target.closest("tr[data-open]");
+  if (row) { state.openId = Number(row.dataset.open); await loadDetail(); $("detail").scrollIntoView({ behavior: "smooth" }); }
+};
+$("prev").onclick = () => { state.offset = Math.max(0, state.offset - LIMIT); loadTickets(); };
+$("next").onclick = () => { state.offset += LIMIT; loadTickets(); };
+let filterTimer;
+for (const id of ["f-q", "f-status", "f-priority", "f-breached"]) {
+  $(id).oninput = () => { clearTimeout(filterTimer); filterTimer = setTimeout(() => { state.offset = 0; loadTickets(); }, 250); };
+}
+
+// ---------- ticket detail ----------
+async function loadDetail() {
+  const box = $("detail");
+  if (!state.openId) return box.classList.add("hidden");
+  let t;
+  try { t = await api(`/api/tickets/${state.openId}`); } catch { state.openId = null; return box.classList.add("hidden"); }
+  const history = t.events.map((ev) => `<li><b>${esc(ev.actor.name)}</b> changed ${esc(ev.field.replace("_id", ""))}: ${esc(ev.old_value ?? "none")} → ${esc(ev.new_value ?? "none")} <span class="muted">· ${esc(when(ev.created_at))}</span></li>`).join("");
+  const comments = t.comments.map((c) => `<li><b>${esc(c.author.name)}</b> <span class="muted">· ${esc(when(c.created_at))}</span><br>${esc(c.body)}</li>`).join("");
+  box.innerHTML = `
+    <h2>#${t.id} · ${esc(t.title)}</h2>
+    <p style="white-space:pre-wrap; overflow-wrap:anywhere">${esc(t.description)}</p>
+    <p class="muted">Opened ${esc(when(t.created_at))} by ${esc(t.requester.name)} · ${esc(t.category)} · ${esc(t.priority)} priority · ${esc(t.status.replace("_", " "))}</p>
+    <h2>Conversation</h2>
+    <ul class="timeline">${comments || '<li class="muted">No comments yet.</li>'}</ul>
+    ${t.status === "closed" ? "" : `<form id="comment-form" style="margin-top:10px; display:flex; gap:8px">
+        <input id="comment" aria-label="Add a comment" placeholder="Add a comment" required maxlength="2000"><button class="primary" type="submit">Send</button></form>`}
+    <h2 style="margin-top:16px">History</h2>
+    <ul class="timeline">${history || '<li class="muted">No changes yet.</li>'}</ul>`;
+  box.classList.remove("hidden");
+  const form = $("comment-form");
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api(`/api/tickets/${t.id}/comments`, { method: "POST", body: { body: $("comment").value } }); } catch (err) { alert(err.message); }
+    loadDetail();
+  };
+}
+
+// ---------- new ticket + live triage preview ----------
+let previewTimer;
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    const title = $("title").value.trim();
+    if (title.length < 3) return;
+    try {
+      const p = await api("/api/triage/preview", { method: "POST", body: { title, description: $("description").value } });
+      $("preview").innerHTML = `Will be routed to <b>${esc(p.category)}</b> (${Math.round(p.confidence * 100)}% confident${p.needs_review ? ", flagged for human review" : ""})
+        · <span class="pill ${esc(p.priority)}">${esc(p.priority)}</span> · resolve within <b>${p.sla_hours}h</b>`;
+    } catch { /* preview is best-effort */ }
+  }, 350);
+}
+$("title").oninput = schedulePreview; $("description").oninput = schedulePreview;
+
+$("ticket-form").onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/tickets", { method: "POST", body: { title: $("title").value, description: $("description").value } });
+    e.target.reset(); $("ticket-error").textContent = "";
+    $("preview").textContent = "Ticket submitted. Start typing to preview another.";
+    state.offset = 0; refresh();
+  } catch (err) { $("ticket-error").textContent = err.message; }
+};
+
+async function refresh() {
+  try { await Promise.all([loadStats(), loadTickets(), loadDetail()]); } catch (err) { console.error(err); }
+}
+
+// ---------- boot ----------
+(async () => {
+  if (state.token) {
+    try { state.user = await api("/api/auth/me"); return showApp(); } catch { /* fall through to login */ }
+  }
+  $("auth").classList.remove("hidden");
+})();
+</script>
+</body>
+</html>
